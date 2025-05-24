@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Burger Blaster - Retro Shooting Game</title>
+    <title>Burger Blaster - Boss Battle Balanced</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
         
@@ -26,7 +26,6 @@
         #canvas {
             display: block;
             background: #000;
-            image-rendering: pixelated;
         }
         
         #ui {
@@ -41,21 +40,62 @@
             text-align: right;
         }
         
-        #gameOver {
+        #bossHpBar {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 400px;
+            height: 20px;
+            border: 3px solid #ff0000;
+            background: rgba(0,0,0,0.8);
+            z-index: 100;
+            display: none;
+        }
+        
+        #bossHpFill {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, #ff0000, #ff8800, #ffff00);
+            transition: width 0.3s ease;
+        }
+        
+        #bossName {
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #ff0000;
+            font-size: 18px;
+            font-weight: 900;
+            text-shadow: 0 0 10px #ff0000;
+        }
+        
+        #gameOver, #victory {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #ff0080;
             font-size: 48px;
             font-weight: 900;
             text-align: center;
-            text-shadow: 0 0 20px #ff0080;
             z-index: 100;
             display: none;
-            border: 3px solid #ff0080;
+            border: 3px solid;
             padding: 30px;
             background: rgba(0,0,0,0.8);
+        }
+        
+        #gameOver {
+            color: #ff0080;
+            border-color: #ff0080;
+            text-shadow: 0 0 20px #ff0080;
+        }
+        
+        #victory {
+            color: #00ff00;
+            border-color: #00ff00;
+            text-shadow: 0 0 20px #00ff00;
         }
         
         #instructions {
@@ -107,6 +147,25 @@
             0% { transform: scale(0); opacity: 1; }
             100% { transform: scale(3); opacity: 0; }
         }
+        
+        .boss-warning {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff0000;
+            font-size: 72px;
+            font-weight: 900;
+            text-shadow: 0 0 30px #ff0000;
+            z-index: 200;
+            animation: warning 2s ease-out;
+        }
+        
+        @keyframes warning {
+            0% { opacity: 0; transform: translate(-50%, -50%) scale(0); }
+            50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+            100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+        }
     </style>
 </head>
 <body>
@@ -116,497 +175,847 @@
             <div>スコア: <span id="score">0</span></div>
             <div>残り時間: <span id="timer">30</span>秒</div>
         </div>
+        <div id="bossHpBar">
+            <div id="bossName">グリマス・ザ・デストロイヤー</div>
+            <div id="bossHpFill"></div>
+        </div>
         <div id="instructions">
-            🖱️ マウスで照準 | クリックで射撃 | 🍔 ハンバーガー: 10pt | 🍔🍔 ダブル: 20pt | 🍔👑 ビッグマック: 100pt
+            🖱️ マウスで照準 | クリックで射撃 | 🍔 ハンバーガー: 10pt | 🍔🍔 ダブル: 20pt | 🍔👑 ビッグマック: 100pt<br>
+            🎯 1500点でラスボス戦！
         </div>
         <div id="gameOver">
             <div id="finalScore"></div>
             <div style="font-size: 24px; margin-top: 20px;">Rキーでリスタート</div>
         </div>
+        <div id="victory">
+            <div>🎉 グリマス撃破！ 🎉</div>
+            <div style="font-size: 24px; margin-top: 20px;">あなたは真のハンターです！</div>
+            <div style="font-size: 18px; margin-top: 10px;">Rキーでリスタート</div>
+        </div>
     </div>
 
-    <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const scoreElement = document.getElementById('score');
-        const timerElement = document.getElementById('timer');
-        const gameOverElement = document.getElementById('gameOver');
-        const finalScoreElement = document.getElementById('finalScore');
 
-        // キャンバスサイズ設定
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+
+
+
+
+
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const scoreElement = document.getElementById('score');
+const timerElement = document.getElementById('timer');
+const gameOverElement = document.getElementById('gameOver');
+const victoryElement = document.getElementById('victory');
+const finalScoreElement = document.getElementById('finalScore');
+const bossHpBar = document.getElementById('bossHpBar');
+const bossHpFill = document.getElementById('bossHpFill');
+
+let audioContext, bgmGain, bgmPlaying = false, bossBgmPlaying = false;
+
+function initAudio() {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        bgmGain = audioContext.createGain();
+        bgmGain.gain.value = 0.25;
+        bgmGain.connect(audioContext.destination);
+        if (!bgmPlaying && gameState === 'playing') {
+            startBGM();
+            bgmPlaying = true;
         }
-        resizeCanvas();
-        window.addEventListener('resize', resizeCanvas);
+    }
+}
 
-        // ゲーム状態
-        let gameState = 'playing';
-        let score = 0;
-        let timeLeft = 30;
-        let gameStartTime = Date.now();
-        let mouseX = 0;
-        let mouseY = 0;
-
-        // ゲームオブジェクト
-        let burgers = [];
-        let bullets = [];
-        let particles = [];
-
-        // ハンバーガーの種類
-        const BURGER_TYPES = {
-            NORMAL: { points: 10, color: '#8B4513', size: 30, probability: 0.65 },
-            DOUBLE: { points: 20, color: '#A0522D', size: 35, probability: 0.2 },
-            BIGMAC: { points: 100, color: '#FFD700', size: 40, probability: 0.05 }
-        };
-
-        // ハンバーガークラス
-        class Burger {
-            constructor(x, y) {
-                this.x = x;
-                this.y = y;
-                this.speed = 2 + Math.random() * 3;
-                this.rotation = 0;
-                this.rotationSpeed = (Math.random() - 0.5) * 0.2;
-                
-                // タイプ決定
-                const rand = Math.random();
-                if (rand < BURGER_TYPES.BIGMAC.probability) {
-                    this.type = 'BIGMAC';
-                } else if (rand < BURGER_TYPES.BIGMAC.probability + BURGER_TYPES.DOUBLE.probability) {
-                    this.type = 'DOUBLE';
-                } else {
-                    this.type = 'NORMAL';
-                }
-                
-                this.data = BURGER_TYPES[this.type];
-                this.size = this.data.size;
-                this.hit = false;
-            }
-
-            update() {
-                // 時間経過で速度アップ
-                const timeProgress = (30 - timeLeft) / 30;
-                this.speed = (2 + Math.random() * 3) * (1 + timeProgress * 3);
-                
-                this.y += this.speed;
-                this.rotation += this.rotationSpeed;
-            }
-
-            draw() {
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                ctx.rotate(this.rotation);
-
-                if (this.type === 'BIGMAC') {
-                    this.drawBigMac();
-                } else if (this.type === 'DOUBLE') {
-                    this.drawDouble();
-                } else {
-                    this.drawNormal();
-                }
-
-                ctx.restore();
-
-                // グロー効果
-                if (this.type === 'BIGMAC') {
-                    ctx.save();
-                    ctx.globalCompositeOperation = 'screen';
-                    ctx.fillStyle = 'rgba(255, 215, 0, 0.3)';
-                    ctx.beginPath();
-                    ctx.arc(this.x, this.y, this.size + 10, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.restore();
-                }
-            }
-
-            drawNormal() {
-                // 上のバン
-                ctx.fillStyle = '#D2691E';
-                ctx.fillRect(-this.size/2, -this.size/2, this.size, 8);
-                
-                // レタス
-                ctx.fillStyle = '#90EE90';
-                ctx.fillRect(-this.size/2 + 2, -this.size/2 + 8, this.size - 4, 4);
-                
-                // パティ
-                ctx.fillStyle = '#8B0000';
-                ctx.fillRect(-this.size/2 + 1, -this.size/2 + 12, this.size - 2, 8);
-                
-                // 下のバン
-                ctx.fillStyle = '#D2691E';
-                ctx.fillRect(-this.size/2, -this.size/2 + 20, this.size, 8);
-                
-                // ピクセル風の縁取り
-                ctx.strokeStyle = '#654321';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(-this.size/2, -this.size/2, this.size, 28);
-            }
-
-            drawDouble() {
-                // 上のバン
-                ctx.fillStyle = '#D2691E';
-                ctx.fillRect(-this.size/2, -this.size/2, this.size, 8);
-                
-                // レタス
-                ctx.fillStyle = '#90EE90';
-                ctx.fillRect(-this.size/2 + 2, -this.size/2 + 8, this.size - 4, 4);
-                
-                // パティ1
-                ctx.fillStyle = '#8B0000';
-                ctx.fillRect(-this.size/2 + 1, -this.size/2 + 12, this.size - 2, 6);
-                
-                // チーズ
-                ctx.fillStyle = '#FFD700';
-                ctx.fillRect(-this.size/2 + 1, -this.size/2 + 18, this.size - 2, 3);
-                
-                // パティ2
-                ctx.fillStyle = '#8B0000';
-                ctx.fillRect(-this.size/2 + 1, -this.size/2 + 21, this.size - 2, 6);
-                
-                // 下のバン
-                ctx.fillStyle = '#D2691E';
-                ctx.fillRect(-this.size/2, -this.size/2 + 27, this.size, 8);
-                
-                // 縁取り
-                ctx.strokeStyle = '#654321';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(-this.size/2, -this.size/2, this.size, 35);
-            }
-
-            drawBigMac() {
-                // 王冠エフェクト
-                ctx.fillStyle = '#FFD700';
-                for (let i = 0; i < 8; i++) {
-                    const angle = (i / 8) * Math.PI * 2;
-                    const x = Math.cos(angle) * (this.size/2 + 5);
-                    const y = Math.sin(angle) * (this.size/2 + 5) - this.size/2 - 10;
-                    ctx.fillRect(x - 2, y - 2, 4, 8);
-                }
-                
-                // 上のバン
-                ctx.fillStyle = '#D2691E';
-                ctx.fillRect(-this.size/2, -this.size/2, this.size, 8);
-                
-                // レタス
-                ctx.fillStyle = '#90EE90';
-                ctx.fillRect(-this.size/2 + 2, -this.size/2 + 8, this.size - 4, 4);
-                
-                // パティ1
-                ctx.fillStyle = '#8B0000';
-                ctx.fillRect(-this.size/2 + 1, -this.size/2 + 12, this.size - 2, 6);
-                
-                // 中間バン
-                ctx.fillStyle = '#D2691E';
-                ctx.fillRect(-this.size/2, -this.size/2 + 18, this.size, 6);
-                
-                // レタス2
-                ctx.fillStyle = '#90EE90';
-                ctx.fillRect(-this.size/2 + 2, -this.size/2 + 24, this.size - 4, 4);
-                
-                // パティ2
-                ctx.fillStyle = '#8B0000';
-                ctx.fillRect(-this.size/2 + 1, -this.size/2 + 28, this.size - 2, 6);
-                
-                // 下のバン
-                ctx.fillStyle = '#D2691E';
-                ctx.fillRect(-this.size/2, -this.size/2 + 34, this.size, 8);
-                
-                // 特別な縁取り
-                ctx.strokeStyle = '#FFD700';
-                ctx.lineWidth = 3;
-                ctx.strokeRect(-this.size/2, -this.size/2, this.size, 42);
-            }
-
-            isOffScreen() {
-                return this.y > canvas.height + this.size;
-            }
-
-            checkCollision(bullet) {
-                const dx = this.x - bullet.x;
-                const dy = this.y - bullet.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                return distance < this.size / 2 + bullet.size;
-            }
-        }
-
-        // 弾丸クラス
-        class Bullet {
-            constructor(startX, startY, targetX, targetY) {
-                this.x = startX;
-                this.y = startY;
-                this.size = 4;
-                this.speed = 15;
-                
-                // 方向計算
-                const dx = targetX - startX;
-                const dy = targetY - startY;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                
-                this.vx = (dx / distance) * this.speed;
-                this.vy = (dy / distance) * this.speed;
-                
-                this.trail = [];
-            }
-
-            update() {
-                // 軌跡記録
-                this.trail.push({ x: this.x, y: this.y });
-                if (this.trail.length > 5) {
-                    this.trail.shift();
-                }
-                
-                this.x += this.vx;
-                this.y += this.vy;
-            }
-
-            draw() {
-                // 軌跡
-                ctx.strokeStyle = '#ffff00';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                this.trail.forEach((point, index) => {
-                    const alpha = (index + 1) / this.trail.length;
-                    ctx.globalAlpha = alpha * 0.5;
-                    if (index === 0) {
-                        ctx.moveTo(point.x, point.y);
-                    } else {
-                        ctx.lineTo(point.x, point.y);
-                    }
-                });
-                ctx.stroke();
-                ctx.globalAlpha = 1;
-                
-                // ポテト弾
-                ctx.fillStyle = '#FFD700';
-                ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
-                
-                ctx.fillStyle = '#FFA500';
-                ctx.fillRect(this.x - this.size/2 + 1, this.y - this.size/2 + 1, this.size - 2, this.size - 2);
-            }
-
-            isOffScreen() {
-                return this.x < 0 || this.x > canvas.width || this.y < 0 || this.y > canvas.height;
-            }
-        }
-
-        // パーティクルクラス
-        class Particle {
-            constructor(x, y, color) {
-                this.x = x;
-                this.y = y;
-                this.vx = (Math.random() - 0.5) * 10;
-                this.vy = (Math.random() - 0.5) * 10;
-                this.life = 1;
-                this.decay = 0.02;
-                this.color = color;
-                this.size = Math.random() * 4 + 2;
-            }
-
-            update() {
-                this.x += this.vx;
-                this.y += this.vy;
-                this.vy += 0.2; // 重力
-                this.life -= this.decay;
-            }
-
-            draw() {
-                ctx.save();
-                ctx.globalAlpha = this.life;
-                ctx.fillStyle = this.color;
-                ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
-                ctx.restore();
-            }
-
-            isDead() {
-                return this.life <= 0;
-            }
-        }
-
-        // ハンバーガー生成
-        function spawnBurger() {
+function startBGM() {
+    if (!audioContext || bgmPlaying) return;
+    bgmPlaying = true;
+    
+    const playNote = (freq, time, dur, vol = 0.15) => {
+        const osc = audioContext.createOscillator();
+        const noteGain = audioContext.createGain();
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        noteGain.gain.setValueAtTime(0, time);
+        noteGain.gain.linearRampToValueAtTime(vol, time + 0.01);
+        noteGain.gain.linearRampToValueAtTime(vol * 0.6, time + dur * 0.8);
+        noteGain.gain.linearRampToValueAtTime(0, time + dur);
+        osc.connect(noteGain);
+        noteGain.connect(bgmGain);
+        osc.start(time);
+        osc.stop(time + dur);
+    };
+    
+    const loop = () => {
+        if (gameState !== 'playing') return;
+        const melody = [330,330,392,440,392,330,294,523,494,440,392,330,294,330];
+        const durations = [0.25,0.125,0.25,0.25,0.25,0.125,0.375,0.25,0.125,0.25,0.25,0.25,0.25,0.5];
+        let time = audioContext.currentTime;
+        melody.forEach((freq, i) => {
+            playNote(freq, time, durations[i]);
+            time += durations[i];
+        });
+        setTimeout(() => { 
             if (gameState === 'playing') {
-                const x = Math.random() * (canvas.width - 100) + 50;
-                burgers.push(new Burger(x, -50));
+                loop(); 
             }
-        }
+        }, time * 1000 - audioContext.currentTime * 1000);
+    };
+    loop();
+}
 
-        // 爆発エフェクト
-        function createExplosion(x, y, color, count = 10) {
-            for (let i = 0; i < count; i++) {
-                particles.push(new Particle(x, y, color));
+function startBossBGM() {
+    if (!audioContext || bossBgmPlaying) return;
+    bossBgmPlaying = true;
+    
+    const playNote = (freq, time, dur, vol = 0.12) => {
+        const osc = audioContext.createOscillator();
+        const noteGain = audioContext.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.value = freq;
+        noteGain.gain.setValueAtTime(0, time);
+        noteGain.gain.linearRampToValueAtTime(vol, time + 0.02);
+        noteGain.gain.linearRampToValueAtTime(vol * 0.7, time + dur * 0.9);
+        noteGain.gain.linearRampToValueAtTime(0, time + dur);
+        osc.connect(noteGain);
+        noteGain.connect(bgmGain);
+        osc.start(time);
+        osc.stop(time + dur);
+    };
+    
+    const loop = () => {
+        if (gameState !== 'boss') return;
+        const melody = [165,185,196,220,196,185,165,220,247,262,294,330,294,262];
+        const durations = [0.5,0.5,0.5,0.5,0.25,0.25,1.0,0.25,0.25,0.25,0.25,0.5,0.5,1.0];
+        let time = audioContext.currentTime;
+        melody.forEach((freq, i) => {
+            playNote(freq, time, durations[i]);
+            time += durations[i];
+        });
+        setTimeout(() => { 
+            if (gameState === 'boss') {
+                loop(); 
             }
-        }
+        }, time * 1000 - audioContext.currentTime * 1000);
+    };
+    loop();
+}
 
-        // スコア表示
-        function showScore(x, y, points) {
-            const popup = document.createElement('div');
-            popup.className = 'score-popup';
-            popup.textContent = `+${points}`;
-            popup.style.left = x + 'px';
-            popup.style.top = y + 'px';
-            document.body.appendChild(popup);
-            
-            setTimeout(() => popup.remove(), 1000);
-        }
+function playShootSound() {
+    if (!audioContext) return;
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(800, audioContext.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.08, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+    osc.connect(gain);
+    gain.connect(audioContext.destination);
+    osc.start();
+    osc.stop(audioContext.currentTime + 0.1);
+}
 
-        // マズルフラッシュ
-        function createMuzzleFlash(x, y) {
-            const flash = document.createElement('div');
-            flash.className = 'muzzle-flash';
-            flash.style.left = (x - 10) + 'px';
-            flash.style.top = (y - 10) + 'px';
-            document.body.appendChild(flash);
-            
-            setTimeout(() => flash.remove(), 100);
-        }
+function playHitSound() {
+    if (!audioContext) return;
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(440, audioContext.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.06, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+    osc.connect(gain);
+    gain.connect(audioContext.destination);
+    osc.start();
+    osc.stop(audioContext.currentTime + 0.2);
+}
 
-        // クロスヘア描画
-        function drawCrosshair() {
-            ctx.strokeStyle = '#00ff00';
-            ctx.lineWidth = 2;
-            
-            // 十字
+function playBigMacSound() {
+    if (!audioContext) return;
+    const melody = [523, 659, 784, 1047];
+    melody.forEach((freq, index) => {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const startTime = audioContext.currentTime + index * 0.12;
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.08, startTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.4);
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+        osc.start(startTime);
+        osc.stop(startTime + 0.4);
+    });
+}
+
+function playBossHitSound() {
+    if (!audioContext) return;
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(150, audioContext.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(300, audioContext.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.15, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(audioContext.destination);
+    osc.start();
+    osc.stop(audioContext.currentTime + 0.3);
+}
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+let gameState = 'playing', score = 0, timeLeft = 30, gameStartTime = Date.now(), bossStartTime = 0, bossTimeLeft = 10;
+let mouseX = 0, mouseY = 0, burgers = [], bullets = [], particles = [], boss = null, gunX = 0, gunY = 0;
+
+const BURGER_TYPES = {
+    NORMAL: { points: 10, color: '#8B4513', size: 30 },
+    DOUBLE: { points: 20, color: '#A0522D', size: 35 },
+    BIGMAC: { points: 100, color: '#FFD700', size: 40 }
+};
+
+
+
+
+
+
+
+
+class Boss {
+    constructor() {
+        this.x = canvas.width / 2;
+        this.y = 150;
+        this.size = 120;
+        this.maxHp = 30; // HPを50→30に減少
+        this.hp = this.maxHp;
+        this.vx = 3;
+        this.direction = 1;
+        this.animationFrame = 0;
+        this.hitFlash = 0;
+    }
+
+    update() {
+        this.x += this.vx * this.direction;
+        if (this.x <= this.size/2 || this.x >= canvas.width - this.size/2) {
+            this.direction *= -1;
+            this.vx = 2 + Math.random() * 4;
+        }
+        if (Math.random() < 0.02) this.direction *= -1;
+        this.animationFrame += 0.1;
+        if (this.hitFlash > 0) this.hitFlash--;
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        
+        if (this.hitFlash > 0) {
+            ctx.fillStyle = '#ffffff';
+            ctx.globalAlpha = 0.7;
             ctx.beginPath();
-            ctx.moveTo(mouseX - 15, mouseY);
-            ctx.lineTo(mouseX + 15, mouseY);
-            ctx.moveTo(mouseX, mouseY - 15);
-            ctx.lineTo(mouseX, mouseY + 15);
+            ctx.arc(0, 0, this.size/2 + 10, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
+        // グリマスの体（紫の丸い体）
+        ctx.fillStyle = '#8B008B';
+        ctx.beginPath();
+        ctx.arc(0, 0, this.size/2, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 体の模様
+        ctx.fillStyle = '#9932CC';
+        for (let i = 0; i < 6; i++) {
+            const angle = (i / 6) * Math.PI * 2 + this.animationFrame;
+            const x = Math.cos(angle) * 20;
+            const y = Math.sin(angle) * 20;
+            ctx.beginPath();
+            ctx.arc(x, y, 8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 怖い赤い目
+        ctx.fillStyle = '#FF0000';
+        ctx.beginPath();
+        ctx.arc(-15, -10, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(15, -10, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 瞳
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.arc(-15, -10, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(15, -10, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 邪悪な笑み
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(0, 10, 20, 0, Math.PI);
+        ctx.stroke();
+
+        // 牙
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.moveTo(-10, 15);
+        ctx.lineTo(-5, 25);
+        ctx.lineTo(0, 15);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(0, 15);
+        ctx.lineTo(5, 25);
+        ctx.lineTo(10, 15);
+        ctx.fill();
+
+        // 触手のような腕
+        for (let i = 0; i < 4; i++) {
+            const angle = (i / 4) * Math.PI * 2 + this.animationFrame * 0.5;
+            const armLength = 40 + Math.sin(this.animationFrame * 2 + i) * 10;
+            const endX = Math.cos(angle) * armLength;
+            const endY = Math.sin(angle) * armLength;
+            
+            ctx.strokeStyle = '#8B008B';
+            ctx.lineWidth = 8;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(
+                endX * 0.5 + Math.sin(this.animationFrame + i) * 15,
+                endY * 0.5 + Math.cos(this.animationFrame + i) * 15,
+                endX, endY
+            );
             ctx.stroke();
             
-            // 中心の点
-            ctx.fillStyle = '#ff0000';
-            ctx.fillRect(mouseX - 1, mouseY - 1, 2, 2);
+            ctx.fillStyle = '#8B008B';
+            ctx.beginPath();
+            ctx.arc(endX, endY, 6, 0, Math.PI * 2);
+            ctx.fill();
         }
 
-        // 星空背景
-        function drawStarfield() {
-            ctx.fillStyle = '#ffffff';
-            for (let i = 0; i < 100; i++) {
-                const x = (i * 37) % canvas.width;
-                const y = (i * 73 + Date.now() * 0.1) % canvas.height;
-                const size = Math.sin(i) > 0.8 ? 2 : 1;
-                ctx.fillRect(x, y, size, size);
+        ctx.restore();
+
+        // オーラエフェクト
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.fillStyle = 'rgba(139, 0, 139, 0.3)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size/2 + 20 + Math.sin(this.animationFrame) * 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    takeDamage() {
+        this.hp -= 1.5; // ダメージを1.5倍に
+        this.hitFlash = 10;
+        playBossHitSound();
+        const hpPercent = (this.hp / this.maxHp) * 100;
+        bossHpFill.style.width = Math.max(0, hpPercent) + '%';
+        return this.hp <= 0;
+    }
+
+    checkCollision(bullet) {
+        const dx = this.x - bullet.x;
+        const dy = this.y - bullet.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        return distance < this.size / 2 + bullet.size;
+    }
+}
+
+class Burger {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.speed = 2 + Math.random() * 3;
+        this.rotation = 0;
+        this.rotationSpeed = (Math.random() - 0.5) * 0.2;
+        const rand = Math.random();
+        if (rand < 0.05) {
+            this.type = 'BIGMAC';
+        } else if (rand < 0.25) {
+            this.type = 'DOUBLE';
+        } else {
+            this.type = 'NORMAL';
+        }
+        this.data = BURGER_TYPES[this.type];
+        this.size = this.data.size;
+    }
+
+    update() {
+        const timeProgress = (30 - timeLeft) / 30;
+        // 通常ステージの難易度調整：適度な速度に
+        this.speed = (3 + Math.random() * 4) * (1 + timeProgress * 3.5);
+        this.y += this.speed;
+        this.rotation += this.rotationSpeed;
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+        if (this.type === 'BIGMAC') {
+            this.drawBigMac();
+        } else if (this.type === 'DOUBLE') {
+            this.drawDouble();
+        } else {
+            this.drawNormal();
+        }
+        ctx.restore();
+        if (this.type === 'BIGMAC') {
+            ctx.save();
+            ctx.globalCompositeOperation = 'screen';
+            ctx.fillStyle = 'rgba(255, 215, 0, 0.3)';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size + 10, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    drawNormal() {
+        ctx.fillStyle = '#D2691E';
+        ctx.fillRect(-this.size/2, -this.size/2, this.size, 8);
+        ctx.fillStyle = '#90EE90';
+        ctx.fillRect(-this.size/2 + 2, -this.size/2 + 8, this.size - 4, 4);
+        ctx.fillStyle = '#8B0000';
+        ctx.fillRect(-this.size/2 + 1, -this.size/2 + 12, this.size - 2, 8);
+        ctx.fillStyle = '#D2691E';
+        ctx.fillRect(-this.size/2, -this.size/2 + 20, this.size, 8);
+        ctx.strokeStyle = '#654321';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-this.size/2, -this.size/2, this.size, 28);
+    }
+
+    drawDouble() {
+        ctx.fillStyle = '#D2691E';
+        ctx.fillRect(-this.size/2, -this.size/2, this.size, 8);
+        ctx.fillStyle = '#90EE90';
+        ctx.fillRect(-this.size/2 + 2, -this.size/2 + 8, this.size - 4, 4);
+        ctx.fillStyle = '#8B0000';
+        ctx.fillRect(-this.size/2 + 1, -this.size/2 + 12, this.size - 2, 6);
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(-this.size/2 + 1, -this.size/2 + 18, this.size - 2, 3);
+        ctx.fillStyle = '#8B0000';
+        ctx.fillRect(-this.size/2 + 1, -this.size/2 + 21, this.size - 2, 6);
+        ctx.fillStyle = '#D2691E';
+        ctx.fillRect(-this.size/2, -this.size/2 + 27, this.size, 8);
+        ctx.strokeStyle = '#654321';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-this.size/2, -this.size/2, this.size, 35);
+    }
+
+    drawBigMac() {
+        ctx.fillStyle = '#FFD700';
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const x = Math.cos(angle) * (this.size/2 + 5);
+            const y = Math.sin(angle) * (this.size/2 + 5) - this.size/2 - 10;
+            ctx.fillRect(x - 2, y - 2, 4, 8);
+        }
+        ctx.fillStyle = '#D2691E';
+        ctx.fillRect(-this.size/2, -this.size/2, this.size, 8);
+        ctx.fillStyle = '#90EE90';
+        ctx.fillRect(-this.size/2 + 2, -this.size/2 + 8, this.size - 4, 4);
+        ctx.fillStyle = '#8B0000';
+        ctx.fillRect(-this.size/2 + 1, -this.size/2 + 12, this.size - 2, 6);
+        ctx.fillStyle = '#D2691E';
+        ctx.fillRect(-this.size/2, -this.size/2 + 18, this.size, 6);
+        ctx.fillStyle = '#90EE90';
+        ctx.fillRect(-this.size/2 + 2, -this.size/2 + 24, this.size - 4, 4);
+        ctx.fillStyle = '#8B0000';
+        ctx.fillRect(-this.size/2 + 1, -this.size/2 + 28, this.size - 2, 6);
+        ctx.fillStyle = '#D2691E';
+        ctx.fillRect(-this.size/2, -this.size/2 + 34, this.size, 8);
+        ctx.strokeStyle = '#FFD700';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(-this.size/2, -this.size/2, this.size, 42);
+    }
+
+    isOffScreen() {
+        return this.y > canvas.height + this.size;
+    }
+
+    checkCollision(bullet) {
+        const dx = this.x - bullet.x;
+        const dy = this.y - bullet.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        return distance < this.size / 2 + bullet.size;
+    }
+}
+
+class Bullet {
+    constructor(startX, startY, targetX, targetY) {
+        this.x = startX;
+        this.y = startY;
+        this.size = 4;
+        this.speed = 15;
+        const dx = targetX - startX;
+        const dy = targetY - startY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        this.vx = (dx / distance) * this.speed;
+        this.vy = (dy / distance) * this.speed;
+        this.trail = [];
+    }
+
+    update() {
+        this.trail.push({ x: this.x, y: this.y });
+        if (this.trail.length > 5) this.trail.shift();
+        this.x += this.vx;
+        this.y += this.vy;
+    }
+
+    draw() {
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        this.trail.forEach((point, index) => {
+            const alpha = (index + 1) / this.trail.length;
+            ctx.globalAlpha = alpha * 0.5;
+            if (index === 0) {
+                ctx.moveTo(point.x, point.y);
+            } else {
+                ctx.lineTo(point.x, point.y);
             }
+        });
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
+        ctx.fillStyle = '#FFA500';
+        ctx.fillRect(this.x - this.size/2 + 1, this.y - this.size/2 + 1, this.size - 2, this.size - 2);
+    }
+
+    isOffScreen() {
+        return this.x < 0 || this.x > canvas.width || this.y < 0 || this.y > canvas.height;
+    }
+}
+
+class Particle {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 10;
+        this.vy = (Math.random() - 0.5) * 10;
+        this.life = 1;
+        this.decay = 0.02;
+        this.color = color;
+        this.size = Math.random() * 4 + 2;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += 0.2;
+        this.life -= this.decay;
+    }
+
+    draw() {
+        ctx.save();
+        ctx.globalAlpha = this.life;
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
+        ctx.restore();
+    }
+
+    isDead() {
+        return this.life <= 0;
+    }
+}
+
+
+
+
+
+
+
+
+function showBossWarning() {
+    const warning = document.createElement('div');
+    warning.className = 'boss-warning';
+    warning.textContent = '⚠️ BOSS BATTLE ⚠️';
+    document.body.appendChild(warning);
+    setTimeout(() => warning.remove(), 2000);
+}
+
+function startBossBattle() {
+    gameState = 'boss';
+    bossStartTime = Date.now();
+    boss = new Boss();
+    burgers = [];
+    bossHpBar.style.display = 'block';
+    bgmPlaying = false; // 通常BGMを停止
+    bossBgmPlaying = false; // ボスBGMをリセット
+    showBossWarning();
+    setTimeout(() => { 
+        if (audioContext) {
+            startBossBGM(); 
         }
+    }, 500);
+}
 
-        // ゲーム更新
-        function update() {
-            if (gameState !== 'playing') return;
+function drawGun() {
+    gunX = canvas.width / 2;
+    gunY = canvas.height - 80;
+    const dx = mouseX - gunX;
+    const dy = mouseY - gunY;
+    const angle = Math.atan2(dy, dx) - Math.PI / 2;
+    
+    ctx.save();
+    ctx.translate(gunX, gunY);
+    ctx.rotate(angle);
+    ctx.fillStyle = '#666';
+    ctx.fillRect(-8, -40, 16, 60);
+    ctx.fillStyle = '#888';
+    ctx.fillRect(-6, -40, 12, 55);
+    ctx.fillStyle = '#444';
+    ctx.fillRect(-10, 10, 20, 25);
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 15, 8, 0, Math.PI);
+    ctx.stroke();
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-4, -42, 8, 4);
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(-3, -20, 6, 15);
+    ctx.strokeStyle = '#ff0000';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -45);
+    ctx.lineTo(0, -50);
+    ctx.stroke();
+    ctx.restore();
+}
 
-            // タイマー更新
-            const elapsed = (Date.now() - gameStartTime) / 1000;
-            timeLeft = Math.max(0, 30 - elapsed);
-            timerElement.textContent = Math.ceil(timeLeft);
+function getGunMuzzlePosition() {
+    const dx = mouseX - gunX;
+    const dy = mouseY - gunY;
+    const angle = Math.atan2(dy, dx) - Math.PI / 2;
+    const muzzleDistance = 42;
+    const muzzleX = gunX + Math.sin(angle) * muzzleDistance;
+    const muzzleY = gunY - Math.cos(angle) * muzzleDistance;
+    return { x: muzzleX, y: muzzleY };
+}
 
-            if (timeLeft <= 0) {
+function spawnBurger() {
+    if (gameState === 'playing') {
+        const x = Math.random() * (canvas.width - 100) + 50;
+        burgers.push(new Burger(x, -50));
+    }
+}
+
+function createExplosion(x, y, color, count = 10) {
+    for (let i = 0; i < count; i++) {
+        particles.push(new Particle(x, y, color));
+    }
+}
+
+function showScore(x, y, points) {
+    const popup = document.createElement('div');
+    popup.className = 'score-popup';
+    popup.textContent = `+${points}`;
+    popup.style.left = x + 'px';
+    popup.style.top = y + 'px';
+    document.body.appendChild(popup);
+    setTimeout(() => popup.remove(), 1000);
+}
+
+function createMuzzleFlash(x, y) {
+    const flash = document.createElement('div');
+    flash.className = 'muzzle-flash';
+    flash.style.left = (x - 10) + 'px';
+    flash.style.top = (y - 10) + 'px';
+    document.body.appendChild(flash);
+    setTimeout(() => flash.remove(), 100);
+}
+
+function drawCrosshair() {
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(mouseX - 15, mouseY);
+    ctx.lineTo(mouseX + 15, mouseY);
+    ctx.moveTo(mouseX, mouseY - 15);
+    ctx.lineTo(mouseX, mouseY + 15);
+    ctx.stroke();
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(mouseX - 1, mouseY - 1, 2, 2);
+}
+
+function drawStarfield() {
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 100; i++) {
+        const x = (i * 37) % canvas.width;
+        const y = (i * 73 + Date.now() * 0.1) % canvas.height;
+        const size = Math.sin(i) > 0.8 ? 2 : 1;
+        ctx.fillRect(x, y, size, size);
+    }
+}
+
+function update() {
+    if (gameState === 'playing') {
+        const elapsed = (Date.now() - gameStartTime) / 1000;
+        timeLeft = Math.max(0, 30 - elapsed);
+        timerElement.textContent = Math.ceil(timeLeft);
+
+        if (timeLeft <= 0) {
+            if (score >= 1500) {
+                startBossBattle();
+            } else {
                 gameState = 'gameOver';
                 finalScoreElement.textContent = `最終スコア: ${score}`;
                 gameOverElement.style.display = 'block';
-                return;
             }
-
-            // ハンバーガー生成頻度（時間経過で増加）
-            const timeProgress = (30 - timeLeft) / 30;
-            const spawnRate = 0.02 + timeProgress * 0.08;
-            
-            if (Math.random() < spawnRate) {
-                spawnBurger();
-            }
-
-            // ハンバーガー更新
-            burgers = burgers.filter(burger => {
-                burger.update();
-                return !burger.isOffScreen();
-            });
-
-            // 弾丸更新
-            bullets = bullets.filter(bullet => {
-                bullet.update();
-                return !bullet.isOffScreen();
-            });
-
-            // パーティクル更新
-            particles = particles.filter(particle => {
-                particle.update();
-                return !particle.isDead();
-            });
-
-            // 衝突判定
-            bullets.forEach((bullet, bulletIndex) => {
-                burgers.forEach((burger, burgerIndex) => {
-                    if (burger.checkCollision(bullet)) {
-                        // ヒット処理
-                        score += burger.data.points;
-                        scoreElement.textContent = score;
-                        
-                        showScore(burger.x, burger.y, burger.data.points);
-                        createExplosion(burger.x, burger.y, burger.data.color, 15);
-                        
-                        // 削除
-                        bullets.splice(bulletIndex, 1);
-                        burgers.splice(burgerIndex, 1);
-                    }
-                });
-            });
+            return;
         }
 
-        // 描画
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            drawStarfield();
-            
-            // ゲームオブジェクト描画
-            burgers.forEach(burger => burger.draw());
-            bullets.forEach(bullet => bullet.draw());
-            particles.forEach(particle => particle.draw());
-            
-            drawCrosshair();
+        if (score >= 1500) {
+            startBossBattle();
+            return;
         }
 
-        // イベントリスナー
-        canvas.addEventListener('mousemove', (e) => {
-            mouseX = e.clientX;
-            mouseY = e.clientY;
-        });
+        const timeProgress = (30 - timeLeft) / 30;
+        // 通常ステージの難易度調整：適度な出現率
+        const spawnRate = 0.05 + timeProgress * 0.15;
+        
+        if (Math.random() < spawnRate) {
+            spawnBurger();
+        }
 
-        canvas.addEventListener('click', (e) => {
-            if (gameState === 'playing') {
-                bullets.push(new Bullet(canvas.width / 2, canvas.height - 50, e.clientX, e.clientY));
-                createMuzzleFlash(e.clientX, e.clientY);
-            }
+        burgers = burgers.filter(burger => {
+            burger.update();
+            return !burger.isOffScreen();
         });
+    } else if (gameState === 'boss') {
+        const elapsed = (Date.now() - bossStartTime) / 1000;
+        bossTimeLeft = Math.max(0, 10 - elapsed); // 10秒に変更
+        timerElement.textContent = `ボス戦: ${Math.ceil(bossTimeLeft)}秒`;
 
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'r' || e.key === 'R') {
-                if (gameState === 'gameOver') {
-                    // リスタート
-                    gameState = 'playing';
-                    score = 0;
-                    timeLeft = 30;
-                    gameStartTime = Date.now();
-                    burgers = [];
-                    bullets = [];
-                    particles = [];
-                    scoreElement.textContent = score;
-                    timerElement.textContent = timeLeft;
-                    gameOverElement.style.display = 'none';
+        if (bossTimeLeft <= 0) {
+            gameState = 'gameOver';
+            finalScoreElement.textContent = `時間切れ！ 最終スコア: ${score}`;
+            gameOverElement.style.display = 'block';
+            bossHpBar.style.display = 'none';
+            return;
+        }
+
+        if (boss) {
+            boss.update();
+        }
+    }
+
+    bullets = bullets.filter(bullet => {
+        bullet.update();
+        return !bullet.isOffScreen();
+    });
+
+    particles = particles.filter(particle => {
+        particle.update();
+        return !particle.isDead();
+    });
+
+    // 衝突判定
+    bullets.forEach((bullet, bulletIndex) => {
+        // ハンバーガーとの衝突
+        burgers.forEach((burger, burgerIndex) => {
+            if (burger.checkCollision(bullet)) {
+                score += burger.data.points;
+                scoreElement.textContent = score;
+                showScore(burger.x, burger.y, burger.data.points);
+                createExplosion(burger.x, burger.y, burger.data.color, 15);
+                if (burger.type === 'BIGMAC') {
+                    playBigMacSound();
+                } else {
+                    playHitSound();
                 }
+                bullets.splice(bulletIndex, 1);
+                burgers.splice(burgerIndex, 1);
             }
         });
 
-        // メインループ
-        function gameLoop() {
-            update();
-            draw();
-            requestAnimationFrame(gameLoop);
+        // ボスとの衝突
+        if (boss && boss.checkCollision(bullet)) {
+            if (boss.takeDamage()) {
+                gameState = 'victory';
+                victoryElement.style.display = 'block';
+                bossHpBar.style.display = 'none';
+            }
+            bullets.splice(bulletIndex, 1);
         }
+    });
+}
 
-        // ゲーム開始
-        gameLoop();
-    </script>
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawStarfield();
+    burgers.forEach(burger => burger.draw());
+    bullets.forEach(bullet => bullet.draw());
+    particles.forEach(particle => particle.draw());
+    if (boss) boss.draw();
+    drawGun();
+    drawCrosshair();
+}
+
+// イベントリスナー
+canvas.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+});
+
+canvas.addEventListener('click', (e) => {
+    if (gameState === 'playing' || gameState === 'boss') {
+        initAudio();
+        const muzzle = getGunMuzzlePosition();
+        bullets.push(new Bullet(muzzle.x, muzzle.y, e.clientX, e.clientY));
+        createMuzzleFlash(muzzle.x, muzzle.y);
+        playShootSound();
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'r' || e.key === 'R') {
+        if (gameState === 'gameOver' || gameState === 'victory') {
+            gameState = 'playing';
+            score = 0;
+            timeLeft = 30;
+            bossTimeLeft = 10; // リセット時も10秒
+            gameStartTime = Date.now();
+            burgers = [];
+            bullets = [];
+            particles = [];
+            boss = null;
+            scoreElement.textContent = score;
+            timerElement.textContent = timeLeft;
+            gameOverElement.style.display = 'none';
+            victoryElement.style.display = 'none';
+            bossHpBar.style.display = 'none';
+            bgmPlaying = false;
+            bossBgmPlaying = false;
+            initAudio();
+        }
+    }
+});
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
 </body>
 </html>
+
 
