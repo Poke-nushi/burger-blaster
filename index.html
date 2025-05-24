@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Burger Blaster - Boss Battle Balanced</title>
+    <title>Burger Blaster - Boss Battle Enhanced</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
         
@@ -100,7 +100,7 @@
         
         #instructions {
             position: absolute;
-            bottom: 20px;
+            bottom: 20px; /* 1番下に配置 */
             left: 50%;
             transform: translateX(-50%);
             color: #00ffff;
@@ -166,6 +166,29 @@
             50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
             100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
         }
+        
+        .boss-explosion {
+            position: absolute;
+            font-size: 64px;
+            animation: bossExplosion 2s ease-out;
+            pointer-events: none;
+            z-index: 150;
+        }
+        
+        @keyframes bossExplosion {
+            0% { 
+                transform: scale(0) rotate(0deg);
+                opacity: 1;
+            }
+            50% {
+                transform: scale(1.5) rotate(180deg);
+                opacity: 0.8;
+            }
+            100% { 
+                transform: scale(3) rotate(360deg);
+                opacity: 0;
+            }
+        }
     </style>
 </head>
 <body>
@@ -193,14 +216,6 @@
             <div style="font-size: 18px; margin-top: 10px;">Rキーでリスタート</div>
         </div>
     </div>
-
-
-
-
-
-
-
-
 <script>
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
@@ -211,6 +226,12 @@ const victoryElement = document.getElementById('victory');
 const finalScoreElement = document.getElementById('finalScore');
 const bossHpBar = document.getElementById('bossHpBar');
 const bossHpFill = document.getElementById('bossHpFill');
+
+// FPS固定用
+const TARGET_FPS = 60;
+const FRAME_TIME = 1000 / TARGET_FPS;
+let lastFrameTime = 0;
+let deltaTime = 0;
 
 let audioContext, bgmGain, bgmPlaying = false, bossBgmPlaying = false;
 
@@ -365,6 +386,46 @@ function playBossHitSound() {
     osc.stop(audioContext.currentTime + 0.3);
 }
 
+// ボス爆発音
+function playBossExplosionSound() {
+    if (!audioContext) return;
+    // 大爆発音
+    for (let i = 0; i < 5; i++) {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.type = 'sawtooth';
+        const startTime = audioContext.currentTime + i * 0.1;
+        osc.frequency.setValueAtTime(100 + Math.random() * 200, startTime);
+        osc.frequency.exponentialRampToValueAtTime(50, startTime + 0.5);
+        gain.gain.setValueAtTime(0.2, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.5);
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+        osc.start(startTime);
+        osc.stop(startTime + 0.5);
+    }
+}
+
+// ファンファーレ
+function playVictoryFanfare() {
+    if (!audioContext) return;
+    const fanfare = [523, 659, 784, 1047, 1319, 1568]; // C5-E5-G5-C6-E6-G6
+    fanfare.forEach((freq, index) => {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        const startTime = audioContext.currentTime + index * 0.2;
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.15, startTime + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.8);
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+        osc.start(startTime);
+        osc.stop(startTime + 0.8);
+    });
+}
+
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -374,26 +435,19 @@ window.addEventListener('resize', resizeCanvas);
 
 let gameState = 'playing', score = 0, timeLeft = 30, gameStartTime = Date.now(), bossStartTime = 0, bossTimeLeft = 10;
 let mouseX = 0, mouseY = 0, burgers = [], bullets = [], particles = [], boss = null, gunX = 0, gunY = 0;
+let bossTimeUp = false; // ボス戦時間切れフラグ
 
 const BURGER_TYPES = {
     NORMAL: { points: 10, color: '#8B4513', size: 30 },
     DOUBLE: { points: 20, color: '#A0522D', size: 35 },
     BIGMAC: { points: 100, color: '#FFD700', size: 40 }
 };
-
-
-
-
-
-
-
-
 class Boss {
     constructor() {
         this.x = canvas.width / 2;
         this.y = 150;
         this.size = 120;
-        this.maxHp = 30; // HPを50→30に減少
+        this.maxHp = 30;
         this.hp = this.maxHp;
         this.vx = 3;
         this.direction = 1;
@@ -401,15 +455,17 @@ class Boss {
         this.hitFlash = 0;
     }
 
-    update() {
-        this.x += this.vx * this.direction;
+    update(deltaTime) {
+        const speedMultiplier = deltaTime / (1000 / 60); // FPS正規化
+        
+        this.x += this.vx * this.direction * speedMultiplier;
         if (this.x <= this.size/2 || this.x >= canvas.width - this.size/2) {
             this.direction *= -1;
             this.vx = 2 + Math.random() * 4;
         }
-        if (Math.random() < 0.02) this.direction *= -1;
-        this.animationFrame += 0.1;
-        if (this.hitFlash > 0) this.hitFlash--;
+        if (Math.random() < 0.02 * speedMultiplier) this.direction *= -1;
+        this.animationFrame += 0.1 * speedMultiplier;
+        if (this.hitFlash > 0) this.hitFlash -= speedMultiplier;
     }
 
     draw() {
@@ -517,7 +573,7 @@ class Boss {
     }
 
     takeDamage() {
-        this.hp -= 1.5; // ダメージを1.5倍に
+        this.hp -= 1.4; // ダメージを1.4倍に調整
         this.hitFlash = 10;
         playBossHitSound();
         const hpPercent = (this.hp / this.maxHp) * 100;
@@ -552,12 +608,14 @@ class Burger {
         this.size = this.data.size;
     }
 
-    update() {
+    update(deltaTime) {
+        const speedMultiplier = deltaTime / (1000 / 60); // FPS正規化
         const timeProgress = (30 - timeLeft) / 30;
-        // 通常ステージの難易度調整：適度な速度に
+        
+        // 通常ステージの難易度調整：適度な速度に（FPS固定対応）
         this.speed = (3 + Math.random() * 4) * (1 + timeProgress * 3.5);
-        this.y += this.speed;
-        this.rotation += this.rotationSpeed;
+        this.y += this.speed * speedMultiplier;
+        this.rotation += this.rotationSpeed * speedMultiplier;
     }
 
     draw() {
@@ -668,11 +726,13 @@ class Bullet {
         this.trail = [];
     }
 
-    update() {
+    update(deltaTime) {
+        const speedMultiplier = deltaTime / (1000 / 60); // FPS正規化
+        
         this.trail.push({ x: this.x, y: this.y });
         if (this.trail.length > 5) this.trail.shift();
-        this.x += this.vx;
-        this.y += this.vy;
+        this.x += this.vx * speedMultiplier;
+        this.y += this.vy * speedMultiplier;
     }
 
     draw() {
@@ -713,11 +773,13 @@ class Particle {
         this.size = Math.random() * 4 + 2;
     }
 
-    update() {
-        this.x += this.vx;
-        this.y += this.vy;
-        this.vy += 0.2;
-        this.life -= this.decay;
+    update(deltaTime) {
+        const speedMultiplier = deltaTime / (1000 / 60); // FPS正規化
+        
+        this.x += this.vx * speedMultiplier;
+        this.y += this.vy * speedMultiplier;
+        this.vy += 0.2 * speedMultiplier; // 重力
+        this.life -= this.decay * speedMultiplier;
     }
 
     draw() {
@@ -732,14 +794,6 @@ class Particle {
         return this.life <= 0;
     }
 }
-
-
-
-
-
-
-
-
 function showBossWarning() {
     const warning = document.createElement('div');
     warning.className = 'boss-warning';
@@ -751,11 +805,12 @@ function showBossWarning() {
 function startBossBattle() {
     gameState = 'boss';
     bossStartTime = Date.now();
+    bossTimeUp = false; // ボス戦時間切れフラグリセット
     boss = new Boss();
     burgers = [];
     bossHpBar.style.display = 'block';
-    bgmPlaying = false; // 通常BGMを停止
-    bossBgmPlaying = false; // ボスBGMをリセット
+    bgmPlaying = false;
+    bossBgmPlaying = false;
     showBossWarning();
     setTimeout(() => { 
         if (audioContext) {
@@ -764,49 +819,105 @@ function startBossBattle() {
     }, 500);
 }
 
+function createBossExplosion() {
+    // ボス爆発エフェクト
+    for (let i = 0; i < 20; i++) {
+        setTimeout(() => {
+            const explosion = document.createElement('div');
+            explosion.className = 'boss-explosion';
+            explosion.textContent = '💥';
+            explosion.style.left = (boss.x - 32 + Math.random() * 64) + 'px';
+            explosion.style.top = (boss.y - 32 + Math.random() * 64) + 'px';
+            document.body.appendChild(explosion);
+            setTimeout(() => explosion.remove(), 2000);
+        }, i * 100);
+    }
+    
+    // 大量のパーティクル
+    for (let i = 0; i < 50; i++) {
+        particles.push(new Particle(boss.x, boss.y, '#FF0000'));
+        particles.push(new Particle(boss.x, boss.y, '#FF8800'));
+        particles.push(new Particle(boss.x, boss.y, '#FFFF00'));
+    }
+    
+    playBossExplosionSound();
+}
+
 function drawGun() {
     gunX = canvas.width / 2;
-    gunY = canvas.height - 80;
+    gunY = canvas.height - 180; // 150px → 180pxに変更（さらに上に）
     const dx = mouseX - gunX;
     const dy = mouseY - gunY;
-    const angle = Math.atan2(dy, dx) - Math.PI / 2;
+    
+    // 銃の角度計算（マウスに向ける）
+    let angle = Math.atan2(dy, dx) - Math.PI / 2;
+    
+    // 銃の回転制限を削除または緩和（上半分全体をカバー）
+    if (dy > 0) { // マウスが銃より下にある場合は真上を向く
+        angle = 0;
+    }
     
     ctx.save();
     ctx.translate(gunX, gunY);
     ctx.rotate(angle);
+    
+    // 銃身
     ctx.fillStyle = '#666';
     ctx.fillRect(-8, -40, 16, 60);
+    
+    // 銃身の詳細
     ctx.fillStyle = '#888';
     ctx.fillRect(-6, -40, 12, 55);
+    
+    // グリップ
     ctx.fillStyle = '#444';
     ctx.fillRect(-10, 10, 20, 25);
+    
+    // トリガーガード
     ctx.strokeStyle = '#666';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(0, 15, 8, 0, Math.PI);
     ctx.stroke();
+    
+    // 銃口
     ctx.fillStyle = '#222';
     ctx.fillRect(-4, -42, 8, 4);
+    
+    // ポテト装填部
     ctx.fillStyle = '#FFD700';
     ctx.fillRect(-3, -20, 6, 15);
+    
+    // 照準
     ctx.strokeStyle = '#ff0000';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(0, -45);
     ctx.lineTo(0, -50);
     ctx.stroke();
+    
     ctx.restore();
 }
 
 function getGunMuzzlePosition() {
     const dx = mouseX - gunX;
     const dy = mouseY - gunY;
-    const angle = Math.atan2(dy, dx) - Math.PI / 2;
+    
+    // 銃の角度計算（drawGunと同じロジック）
+    let angle = Math.atan2(dy, dx) - Math.PI / 2;
+    
+    // 銃の回転制限（drawGunと同じ）
+    if (dy > 0) { // マウスが銃より下にある場合は真上を向く
+        angle = 0;
+    }
+    
     const muzzleDistance = 42;
     const muzzleX = gunX + Math.sin(angle) * muzzleDistance;
     const muzzleY = gunY - Math.cos(angle) * muzzleDistance;
     return { x: muzzleX, y: muzzleY };
 }
+
+
 
 function spawnBurger() {
     if (gameState === 'playing') {
@@ -863,7 +974,7 @@ function drawStarfield() {
     }
 }
 
-function update() {
+function update(deltaTime) {
     if (gameState === 'playing') {
         const elapsed = (Date.now() - gameStartTime) / 1000;
         timeLeft = Math.max(0, 30 - elapsed);
@@ -886,23 +997,24 @@ function update() {
         }
 
         const timeProgress = (30 - timeLeft) / 30;
-        // 通常ステージの難易度調整：適度な出現率
         const spawnRate = 0.05 + timeProgress * 0.15;
+        const speedMultiplier = deltaTime / (1000 / 60);
         
-        if (Math.random() < spawnRate) {
+        if (Math.random() < spawnRate * speedMultiplier) {
             spawnBurger();
         }
 
         burgers = burgers.filter(burger => {
-            burger.update();
+            burger.update(deltaTime);
             return !burger.isOffScreen();
         });
     } else if (gameState === 'boss') {
         const elapsed = (Date.now() - bossStartTime) / 1000;
-        bossTimeLeft = Math.max(0, 10 - elapsed); // 10秒に変更
-        timerElement.textContent = `ボス戦: ${Math.ceil(bossTimeLeft)}秒`;
+        bossTimeLeft = Math.max(0, 10 - elapsed);
+        timerElement.textContent = `ボス戦: ${Math.ceil(bossTimeLeft)}`; // 「秒」を削除
 
-        if (bossTimeLeft <= 0) {
+        if (bossTimeLeft <= 0 && !bossTimeUp) {
+            bossTimeUp = true; // 時間切れフラグを立てる
             gameState = 'gameOver';
             finalScoreElement.textContent = `時間切れ！ 最終スコア: ${score}`;
             gameOverElement.style.display = 'block';
@@ -911,17 +1023,17 @@ function update() {
         }
 
         if (boss) {
-            boss.update();
+            boss.update(deltaTime);
         }
     }
 
     bullets = bullets.filter(bullet => {
-        bullet.update();
+        bullet.update(deltaTime);
         return !bullet.isOffScreen();
     });
 
     particles = particles.filter(particle => {
-        particle.update();
+        particle.update(deltaTime);
         return !particle.isDead();
     });
 
@@ -944,12 +1056,16 @@ function update() {
             }
         });
 
-        // ボスとの衝突
-        if (boss && boss.checkCollision(bullet)) {
+        // ボスとの衝突（時間切れ後は無効）
+        if (boss && boss.checkCollision(bullet) && !bossTimeUp) {
             if (boss.takeDamage()) {
-                gameState = 'victory';
-                victoryElement.style.display = 'block';
-                bossHpBar.style.display = 'none';
+                createBossExplosion(); // ボス爆発エフェクト
+                setTimeout(() => {
+                    gameState = 'victory';
+                    victoryElement.style.display = 'block';
+                    bossHpBar.style.display = 'none';
+                    playVictoryFanfare(); // ファンファーレ
+                }, 1000);
             }
             bullets.splice(bulletIndex, 1);
         }
@@ -962,7 +1078,7 @@ function draw() {
     burgers.forEach(burger => burger.draw());
     bullets.forEach(bullet => bullet.draw());
     particles.forEach(particle => particle.draw());
-    if (boss) boss.draw();
+    if (boss && gameState === 'boss') boss.draw();
     drawGun();
     drawCrosshair();
 }
@@ -989,7 +1105,8 @@ document.addEventListener('keydown', (e) => {
             gameState = 'playing';
             score = 0;
             timeLeft = 30;
-            bossTimeLeft = 10; // リセット時も10秒
+            bossTimeLeft = 10;
+            bossTimeUp = false; // フラグリセット
             gameStartTime = Date.now();
             burgers = [];
             bullets = [];
@@ -1007,15 +1124,20 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-function gameLoop() {
-    update();
-    draw();
+// FPS固定メインループ
+function gameLoop(currentTime) {
+    if (currentTime - lastFrameTime >= FRAME_TIME) {
+        deltaTime = currentTime - lastFrameTime;
+        lastFrameTime = currentTime;
+        
+        update(deltaTime);
+        draw();
+    }
     requestAnimationFrame(gameLoop);
 }
 
-gameLoop();
+// ゲーム開始
+requestAnimationFrame(gameLoop);
 </script>
 </body>
 </html>
-
-
